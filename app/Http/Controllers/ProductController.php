@@ -59,7 +59,17 @@ class ProductController extends Controller
                 $matchDegrees[$product->id][$analog->id] = $matchPercentage;
             }
         }
-        return view('app', compact('products', 'analogProducts', 'matchDegrees', 'sortBy', 'sortDirection'));
+        $allParameterKeys = collect();
+
+        foreach ($products as $product) {
+            $params = is_array($product->parameters) ? $product->parameters : json_decode($product->parameters, true);
+            $allParameterKeys = $allParameterKeys->merge(array_keys($params));
+        }
+
+        $allParameterKeys = $allParameterKeys->unique()->values();
+
+        return view('app', compact('products', 'analogProducts', 'matchDegrees', 'sortBy', 'sortDirection', 'allParameterKeys'));
+
     }
 
     public function showAnalogs($id)

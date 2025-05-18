@@ -48,77 +48,90 @@
         </div>
     </form>
 
-    <table class="min-w-full bg-white rounded-lg shadow-lg mb-6">
-        <thead class="bg-blue-600 text-white">
-        <tr>
-            <th class="px-4 py-2 text-left">
-                <a href="{{ route('product.home', array_merge(request()->all(), ['sort_by' => 'name', 'sort_order' => request('sort_order') == 'asc' ? 'desc' : 'asc'])) }}">
-                    Продукт для сравнения
-                </a>
-            </th>
-            <th class="px-4 py-2 text-left">
-                <a href="{{ route('product.home', array_merge(request()->all(), ['sort_by' => 'manufacturer', 'sort_order' => request('sort_order') == 'asc' ? 'desc' : 'asc'])) }}">
-                    Производитель
-                </a>
-            </th>
-            <th class="px-4 py-2 text-left">
-                Параметры
-            </th>
-            <th class="px-4 py-2 text-left">
-                Цена
-            </th>
-            <th class="px-4 py-2 text-left">Наименование аналога</th>
-            <th class="px-4 py-2 text-left">Степень соответствия</th>
-        </tr>
-        </thead>
-        <tbody>
-        @forelse($products as $product)
-            <tr class="border-t">
-                <td class="px-4 py-2">{{ $product->name }}</td>
-                <td class="px-4 py-2">{{ $product->manufacturer }}</td>
-                <td class="px-4 py-2">
-                    @if (is_array($product->parameters))
-                        {{ implode(', ', $product->parameters) }}
-                    @else
-                        {{ $product->parameters }}
-                    @endif
-                </td>
-                <td class="px-4 py-2">{{ $product->price . ' '  .  $product->currency }} </td>
-                <td class="px-4 py-2">
-                    @if(isset($analogProducts[$product->id]) && $analogProducts[$product->id]->count() > 0)
-                        <a href="{{ route('product.analogs', $product->id) }}" class="text-white bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Посмотреть аналоги</a>
-                    @else
-                        <span class="text-gray-500">Нет аналогов</span>
-                    @endif
-                </td>
-                <td class="px-4 py-2">
-                    @if (isset($analogProducts[$product->id]) && $analogProducts[$product->id]->count() > 0)
-                        @foreach($analogProducts[$product->id] as $analog)
-                            <div>
-                                @php
-                                    $matchPercentage = $matchDegrees[$product->id][$analog->id] ?? 0;
-                                @endphp
-                                @if($matchPercentage >= 50)
-                                    <span style="color: {{ $matchPercentage == 100 ? 'green' : ($matchPercentage >= 75 ? 'orange' : 'red') }}">
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white rounded-lg shadow-lg mb-6">
+            <thead class="bg-blue-600 text-white">
+            <tr>
+                <th class="px-4 py-2 text-left">
+                    <a href="{{ route('product.home', array_merge(request()->all(), ['sort_by' => 'name', 'sort_order' => request('sort_order') == 'asc' ? 'desc' : 'asc'])) }}">
+                        Продукт
+                    </a>
+                </th>
+                <th class="px-4 py-2 text-left">
+                    <a href="{{ route('product.home', array_merge(request()->all(), ['sort_by' => 'manufacturer', 'sort_order' => request('sort_order') == 'asc' ? 'desc' : 'asc'])) }}">
+                        Производитель
+                    </a>
+                </th>
+
+                @foreach($allParameterKeys as $paramKey)
+                    <th class="px-4 py-2 text-left">{{ $paramKey }}</th>
+                @endforeach
+
+                <th class="px-4 py-2 text-left">
+                    <a href="{{ route('product.home', array_merge(request()->all(), ['sort_by' => 'price', 'sort_order' => request('sort_order') == 'asc' ? 'desc' : 'asc'])) }}">
+                        Цена
+                    </a>
+                </th>
+                <th class="px-4 py-2 text-left">Аналоги</th>
+                <th class="px-4 py-2 text-left">Соответствие</th>
+            </tr>
+            </thead>
+            <tbody>
+            @forelse($products as $product)
+                <tr class="border-t">
+                    <td class="px-4 py-2">{{ $product->name }}</td>
+                    <td class="px-4 py-2">{{ $product->manufacturer }}</td>
+
+                    @php
+                        $paramArray = is_array($product->parameters)
+                            ? $product->parameters
+                            : json_decode($product->parameters, true);
+                    @endphp
+
+                    @foreach($allParameterKeys as $key)
+                        <td class="px-4 py-2">
+                            {{ $paramArray[$key] ?? '' }}
+                        </td>
+                    @endforeach
+
+                    <td class="px-4 py-2">{{ $product->price . ' ' . $product->currency }}</td>
+
+                    <td class="px-4 py-2">
+                        @if(isset($analogProducts[$product->id]) && $analogProducts[$product->id]->count() > 0)
+                            <a href="{{ route('product.analogs', $product->id) }}" class="text-white bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Посмотреть</a>
+                        @else
+                            <span class="text-gray-500">Нет</span>
+                        @endif
+                    </td>
+                    <td class="px-4 py-2">
+                        @if (isset($analogProducts[$product->id]) && $analogProducts[$product->id]->count() > 0)
+                            @foreach($analogProducts[$product->id] as $analog)
+                                <div>
+                                    @php
+                                        $matchPercentage = $matchDegrees[$product->id][$analog->id] ?? 0;
+                                    @endphp
+                                    @if($matchPercentage >= 50)
+                                        <span style="color: {{ $matchPercentage == 100 ? 'green' : ($matchPercentage >= 75 ? 'orange' : 'red') }}">
                                         {{ $matchPercentage }}%
                                     </span>
-                                @else
-                                    <span>—</span>
-                                @endif
-                            </div>
-                        @endforeach
-                    @else
-                        <span>Нет аналогов</span>
-                    @endif
-                </td>
-            </tr>
-        @empty
-            <tr>
-                <td colspan="7" class="text-center px-4 py-2 text-gray-500">Нет продуктов</td>
-            </tr>
-        @endforelse
-        </tbody>
-    </table>
+                                    @else
+                                        <span>—</span>
+                                    @endif
+                                </div>
+                            @endforeach
+                        @else
+                            <span>—</span>
+                        @endif
+                    </td>
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="{{ 5 + $allParameterKeys->count() }}" class="text-center px-4 py-2 text-gray-500">Нет продуктов</td>
+                </tr>
+            @endforelse
+            </tbody>
+        </table>
+    </div>
 
     <!-- Пагинация -->
     <div class="mt-6">
