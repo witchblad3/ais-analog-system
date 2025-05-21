@@ -15,21 +15,23 @@ class DetermineAnalogsAction
     {
         $baseId = $base->id;
 
-        // 1) Считаем число уникальных параметров у базового товара
-        $totalParams = (int) DB::table('product_characteristic_values as pcv_base')
+        // Считаем число уникальных параметров (по объединённому ключу) у базового
+        $totalParams = DB::table('product_characteristic_values as pcv_base')
+            ->select(
+                DB::raw('COUNT(DISTINCT COALESCE(pcv_base.characteristic_key_mapping_id, pcv_base.characteristic_id))')
+            )
             ->where('pcv_base.product_id', $baseId)
-            ->selectRaw('COUNT(DISTINCT COALESCE(pcv_base.characteristic_key_mapping_id, pcv_base.characteristic_id)) as cnt')
-            ->value('cnt');
+            ->valueRaw();
 
-        if ($totalParams === 0) {
+        if ($totalParams == 0) {
             return collect();
         }
 
         $minMatches = (int) ceil($totalParams * 0.5);
 
-        // 2) Один запрос: джойним базовые «ключ-значение» с остальными
+        // Один запрос: джойним базовые «ключ-значение» с остальными
         $matches = DB::table('product_characteristic_values as base')
-            ->join('product_characteristic_values as other', function($join) {
+            ->join('product_characteristic_values as other', function($join) use($baseId) {
                 $join->on(
                     DB::raw('COALESCE(base.characteristic_key_mapping_id, base.characteristic_id)'),
                     '=',
@@ -51,36 +53,34 @@ class DetermineAnalogsAction
             return collect();
         }
 
-        // 3) Достаём модели продуктов и присваиваем им match_count
+        // Достаём модели продуктов и впихиваем им match_count
         $ids = $matches->pluck('product_id')->all();
-        $products = Product::whereIn('id', $ids)->get()->keyBy('id');
+        $products = Product::whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
 
-        return $matches
-            ->map(fn($row) => tap($products->get($row->product_id), function($p) use($row) {
-                if ($p) {
-                    $p->match_count = (int) $row->match_count;
-                }
-            }))
-            ->filter();
+        return $matches->map(function($row) use($products) {
+            if ($p = $products->get($row->product_id)) {
+                $p->match_count = (int)$row->match_count;
+                return $p;
+            }
+        })->filter();
     }
 
     /**
-     * @param  Product  $base
-     * @param  Product  $analog
-     * @return int
+     *  Процент совпадения = match_count / totalParams * 100
      */
     public function matchPercent(Product $base, Product $analog): int
     {
         $matched = $analog->match_count ?? 0;
 
-        $total = (int) DB::table('product_characteristic_values')
+        $total = DB::table('product_characteristic_values')
             ->where('product_id', $base->id)
-            ->selectRaw('COUNT(DISTINCT COALESCE(characteristic_key_mapping_id, characteristic_id)) as cnt')
-            ->value('cnt');
+            ->select(DB::raw('COUNT(DISTINCT COALESCE(characteristic_key_mapping_id, characteristic_id))'))
+            ->valueRaw();
 
         return $total
             ? (int) round($matched / $total * 100)
             : 0;
     }
 }
-

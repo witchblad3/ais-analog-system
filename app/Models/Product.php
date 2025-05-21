@@ -7,11 +7,22 @@ use Illuminate\Database\Eloquent\Model;
 class Product extends Model
 {
     protected $fillable = [
-        'name', 'manufacturer', 'parameters', 'price', 'currency',
+        'source_site',
+        'name',
+        'price',
+        'info',
+        'file_name',
+        'link'
     ];
 
     protected $casts = [
-        'parameters' => 'array',
+        'info' => 'array',
     ];
+
+    public function characteristicValues()
+    {
+        return $this->hasMany(ProductCharacteristicValue::class);
+    }
 }
+
 

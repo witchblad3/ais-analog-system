@@ -5,125 +5,117 @@ namespace App\Http\Controllers;
 use App\Actions\DetermineAnalogsAction;
 use App\Models\Product;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\File;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
-    public function home(Request $request, DetermineAnalogsAction $action)
+    /**
+     * Показывает страницу с формой поиска и пустой таблицей результатов.
+     */
+    public function appView()
     {
-        $sortBy = $request->get('sort_by', 'name');
-        $sortDirection = $request->get('sort_order', 'asc');
-
-        $sortableFields = ['name', 'manufacturer', 'parameters', 'price', 'currency'];
-
-        if (!in_array($sortBy, $sortableFields)) {
-            $sortBy = 'name';
-        }
-
-        if (!in_array(strtolower($sortDirection), ['asc', 'desc'])) {
-            $sortDirection = 'asc';
-        }
-
-        $products = Product::query()
-            ->when($request->name, fn($q) => $q->where('name', 'like', '%' . $request->name . '%'))
-            ->when($request->manufacturer, fn($q) => $q->where('manufacturer', 'like', '%' . $request->manufacturer . '%'))
-            ->when($request->parameters, fn($q) =>
-            $q->where('parameters', 'like', '%' . $request->parameters . '%')
-            )
-            ->when($request->price, fn($q) => $q->where('price', $request->price))
-            ->orderBy($sortBy, $sortDirection)
-            ->paginate(15);
-        $analogProducts = [];
-        $matchDegrees = [];
-
-        foreach ($products as $product) {
-            $analogs = $action->execute($product);
-            $analogProducts[$product->id] = $analogs;
-            $matchDegrees[$product->id] = [];
-
-            foreach ($analogs as $analog) {
-                $productParams = $product->parameters;
-                $analogParams = $analog->parameters;
-
-                $totalParams = count($productParams);
-                if ($totalParams == 0) {
-                    $matchDegrees[$product->id][$analog->id] = 0;
-                    continue;
-                }
-
-                $matchedParams = count(array_intersect($productParams, $analogParams));
-                $matchPercentage = ($matchedParams / $totalParams) * 100;
-                $matchPercentage = round($matchPercentage);
-
-                $matchDegrees[$product->id][$analog->id] = $matchPercentage;
-            }
-        }
-        $allParameterKeys = collect();
-
-        foreach ($products as $product) {
-            $params = is_array($product->parameters) ? $product->parameters : json_decode($product->parameters, true);
-            $allParameterKeys = $allParameterKeys->merge(array_keys($params));
-        }
-
-        $allParameterKeys = $allParameterKeys->unique()->values();
-
-        return view('app', compact('products', 'analogProducts', 'matchDegrees', 'sortBy', 'sortDirection', 'allParameterKeys'));
-
+        return view('app');
     }
 
-    public function showAnalogs($id)
+    /**
+     * AJAX‑эндпоинт: возвращает до 10 вариантов автодополнения по полю term.
+     */
+    public function suggestions(Request $request)
     {
-        $product = Product::findOrFail($id);
-        $analogProducts = (new DetermineAnalogsAction())->execute($product);
-        $matchDegrees = $this->calculateMatchDegrees($product, $analogProducts);
+        $q = trim($request->get('term', ''));
+        // например, вернём до 50 вариантов
+        $limit = (int) $request->get('limit', 20);
 
-        return view('analogs', compact('product', 'analogProducts', 'matchDegrees'));
+        $names = Product::query()
+            ->where('name', 'like', "%{$q}%")
+            ->distinct('name')
+            ->limit($limit)
+            ->pluck('name');
+
+        return response()->json($names);
     }
 
-    protected function calculateMatchDegrees(Product $product, $analogProducts)
+    /**
+     * AJAX‑эндпоинт: получает GET-параметр name и возвращает JSON
+     * с базовым товаром и списком аналогов (>=50% совпадений).
+     */
+    public function apiAnalogs(Request $request, DetermineAnalogsAction $action)
     {
-        $matchDegrees = [];
-
-        foreach ($analogProducts as $analog) {
-            $matchPercentage = 0;
-            $parameters1 = json_decode($product->parameters, true);
-            $parameters2 = json_decode($analog->parameters, true);
-
-            $matchCount = 0;
-            for ($i = 0; $i < min(count($parameters1), 3); $i++) {
-                if ($parameters1[$i] == $parameters2[$i]) {
-                    $matchCount++;
-                }
-            }
-            $matchPercentage = ($matchCount / 3) * 100;
-
-            $matchDegrees[$product->id][$analog->id] = $matchPercentage;
-        }
-
-        return $matchDegrees;
-    }
-    public function uploadCsv(Request $request)
-    {
-        $validated = $request->validate([
-            'manufacturer' => 'required|string|max:255',
-            'csv_file' => 'required|file|mimes:csv,txt',
+        set_time_limit(300);
+        $request->validate([
+            'name'       => 'required|string',
+            'length'     => 'integer|min:1|max:100',
+            'start'      => 'integer|min:0',
+            'sort_by'    => 'in:source_site,name,price,match_percent',
+            'sort_dir'   => 'in:asc,desc',
         ]);
 
-        $manufacturer = $request->input('manufacturer');
-        $file = $request->file('csv_file');
+        $name    = $request->name;
+        $start   = (int) $request->get('start', 0);
+        $length  = (int) $request->get('length', 10);
+        $sortBy  = $request->get('sort_by', 'match_percent');
+        $sortDir = $request->get('sort_dir', 'desc');
 
-        $manufacturerPath = storage_path('app/Imports/Products/' . $manufacturer);
+        $base = Product::where('name', $name)->firstOrFail();
 
-        if (!File::exists($manufacturerPath)) {
-            File::makeDirectory($manufacturerPath, 0777, true);
-        }
+        $allAnalogs = $action->execute($base);
+        $analogIds  = $allAnalogs->pluck('id')->all();
 
-        $filePath = $manufacturerPath . '/' . $file->getClientOriginalName();
-        $file->move($manufacturerPath, $file->getClientOriginalName());
+        $idsForParams = array_merge([$base->id], $analogIds);
 
-        Artisan::call('import:csv', ['filePath' => $filePath]);
+        $rawParams = DB::table('product_characteristic_values as pcv')
+            ->leftJoin('characteristic_key_mappings as ckm', 'pcv.characteristic_key_mapping_id', '=', 'ckm.id')
+            ->leftJoin('characteristics as ch',        'pcv.characteristic_id',              '=', 'ch.id')
+            ->whereIn('pcv.product_id', $idsForParams)
+            ->select([
+                'pcv.product_id',
+                DB::raw('COALESCE(ckm.remote_key, ch.key) as param_name'),
+                'pcv.value',
+            ])
+            ->get();
 
-        return back()->with('success', 'Файл успешно загружен и данные добавлены в базу!');
+        $paramsByProduct = $rawParams
+            ->groupBy('product_id')
+            ->map(fn($group) => $group->pluck('value','param_name')->all())
+            ->toArray();
+
+        $baseBlock = [
+            'source_site' => $base->source_site,
+            'name'        => $base->name,
+            'external_id' => $base->external_id,
+            'price'       => $base->price,
+            'parameters'  => $paramsByProduct[$base->id] ?? [],
+        ];
+
+        $rows = $allAnalogs->map(function($p) use($action, $base, $paramsByProduct){
+            return [
+                'source_site'   => $p->source_site,
+                'name'          => $p->name,
+                'external_id'   => $p->external_id,
+                'price'         => $p->price,
+                'match_percent' => $action->matchPercent($base, $p),
+                'parameters'    => $paramsByProduct[$p->id] ?? [],
+            ];
+        });
+
+        $rows = collect($rows)
+            ->sortBy(fn($item) => is_string($item[$sortBy])
+                ? mb_strtolower($item[$sortBy])
+                : $item[$sortBy],
+                SORT_REGULAR,
+                $sortDir === 'desc')
+            ->values();
+
+        $total = $rows->count();
+        $paged = $rows->slice($start, $length)->values();
+
+        return response()->json([
+            'base'            => $baseBlock,
+            'analogs'         => $paged,
+            'recordsTotal'    => $total,
+            'recordsFiltered' => $total,
+        ]);
     }
+
 }

@@ -89,12 +89,6 @@
             $("#compare-head, #compare-body, #compare-foot").empty();
             $("#compare-container").addClass('hidden');
 
-            $("#reset-btn").click(() => {
-                $("#search").val('');
-                $("#compare-head, #compare-body, #compare-foot, #pagination").empty();
-                $("#compare-container").addClass('hidden');
-            });
-            
             if (!analogs.length) {
                 $("#compare-container").removeClass('hidden');
                 $("#compare-head")
