@@ -94,7 +94,7 @@
                 $("#compare-head, #compare-body, #compare-foot, #pagination").empty();
                 $("#compare-container").addClass('hidden');
             });
-            
+
             if (!analogs.length) {
                 $("#compare-container").removeClass('hidden');
                 $("#compare-head")
